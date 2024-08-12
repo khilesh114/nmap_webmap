@@ -1,0 +1,58 @@
+name: Deploy Webmap with Ngrok
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Pull Webmap Docker image
+        run: docker pull reborntc/webmap
+
+      - name: Run Webmap container
+        run: |
+          docker run -d \
+          --name webmap \
+          -h webmap \
+          -p 8000:8000 \
+          -v ${{ github.workspace }}/webmap:/opt/xml \
+          reborntc/webmap
+
+      - name: Retrieve Token from Webmap
+        run: docker exec webmap /root/token
+
+      - name: Download and Install ngrok
+        run: |
+          curl -s https://ngrok-agent.s3.amazonaws.com/ngrok.asc | sudo tee /etc/apt/trusted.gpg.d/ngrok.asc > /dev/null &&
+          echo "deb https://ngrok-agent.s3.amazonaws.com buster main" | sudo tee /etc/apt/sources.list.d/ngrok.list &&
+          sudo apt-get update && sudo apt-get install ngrok
+
+      - name: Run ngrok to expose port 8000
+        run: |
+          ngrok authtoken ${{ secrets.NGROK_AUTH_TOKEN }}
+          nohup ngrok http 8000 > ngrok.log &
+        id: ngrok
+
+      - name: Extract ngrok URL
+        run: |
+          NGROK_URL=$(grep -o 'https://[a-z0-9]*\.ngrok\.io' ngrok.log | head -n 1)
+          echo "Ngrok URL: $NGROK_URL"
+          echo "NGROK_URL=$NGROK_URL" >> $GITHUB_ENV
+        id: extract-ngrok-url
+
+      - name: Display ngrok URL
+        run: echo "The Webmap is available at ${{ env.NGROK_URL }}"
+
+      - name: Keep the container running (optional)
+        run: sleep infinity
